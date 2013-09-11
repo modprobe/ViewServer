@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # built application files
 *.apk
 *.ap_
@@ -18,9 +19,6 @@ local.properties
 # Windows thumbnail db
 Thumbs.db
 
-# OSX files
-.DS_Store
-
 # Eclipse project files
 .classpath
 .project
@@ -28,6 +26,12 @@ Thumbs.db
 
 # Android Studio
 .idea
-#.idea/workspace.xml - remove # and delete .idea if it better suit your needs.
+*.iml
+
+# Gradle
 .gradle
-build/
+build
+local.properties
+
+# OS X
+.DS_Store

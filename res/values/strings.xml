@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">View Server Library</string>
+    <string name="stop_localviewserver">Stop LocalViewServer?</string>
+    <string name="confirm_action_dialog_title">Confirm action</string>
     
 </resources>

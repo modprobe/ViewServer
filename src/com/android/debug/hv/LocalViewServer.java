@@ -16,6 +16,21 @@
 
 package com.android.debug.hv;
 
+import android.app.Activity;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.os.Build;
+import android.support.v4.app.NotificationCompat;
+import android.support.v4.app.TaskStackBuilder;
+import android.text.TextUtils;
+import android.util.Log;
+import android.view.View;
+import android.view.ViewDebug;
+import android.widget.Toast;
+
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -33,16 +48,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
-
-import android.app.Activity;
-import android.content.Context;
-import android.content.pm.ApplicationInfo;
-import android.os.Build;
-import android.text.TextUtils;
-import android.util.Log;
-import android.view.View;
-import android.view.ViewDebug;
-import android.widget.Toast;
 
 /**
  * <p>
@@ -149,6 +154,8 @@ public class LocalViewServer implements ViewServer {
     // Returns the focused window
     private static final String COMMAND_WINDOW_MANAGER_GET_FOCUS = "GET_FOCUS";
 
+    private static final int LOCAL_VIEW_SERVER_NOTIFICATION_ID = 0x1234;
+
     private ServerSocket mServer;
     private final int mPort;
 
@@ -168,6 +175,7 @@ public class LocalViewServer implements ViewServer {
     private boolean mBindLocalAddressOnly;
 
     private static ViewServer sServer;
+    private static NotificationManager sNotificationManager;
 
     public static ViewServer get(Context context) {
         return LocalViewServer.get(context, VIEW_SERVER_DEFAULT_PORT, BIND_LOCAL_PORT_ONLY);
@@ -211,6 +219,7 @@ public class LocalViewServer implements ViewServer {
                     toast.getView().setBackgroundColor(0x88ff00ff);
                     toast.show();
                     sServer.start();
+                    showNotification(context, "ViewServer listening on port " + port);
                 } catch (IOException e) {
                     Log.d(LOG_TAG, "Error:", e);
                 }
@@ -280,6 +289,8 @@ public class LocalViewServer implements ViewServer {
     @Override
     public boolean start() throws IOException {
         if (mThread != null) {
+            if (DEBUG)
+                Log.d(LOG_TAG, "start: mThread=" + mThread + " already started.");
             return false;
         }
 
@@ -298,6 +309,8 @@ public class LocalViewServer implements ViewServer {
      */
     @Override
     public boolean stop() {
+        if (DEBUG)
+            Log.d(LOG_TAG, "Local View Server: stopping server");
         if (mThread != null) {
             mThread.interrupt();
             if (mThreadPool != null) {
@@ -314,6 +327,7 @@ public class LocalViewServer implements ViewServer {
             try {
                 mServer.close();
                 mServer = null;
+                cancelNotification();
                 return true;
             } catch (IOException e) {
                 Log.w(LOG_TAG, "Could not close the view server");
@@ -346,6 +360,42 @@ public class LocalViewServer implements ViewServer {
         return mThread != null && mThread.isAlive();
     }
 
+    private static void showNotification(Context context, String message) {
+        sNotificationManager = (NotificationManager) context
+                .getSystemService(Context.NOTIFICATION_SERVICE);
+        // Creates an explicit intent for an Activity in your app
+        Intent resultIntent = new Intent(context, StopLocalViewServerActivity.class);
+        // The stack builder object will contain an artificial back stack for
+        // the
+        // started Activity.
+        // This ensures that navigating backward from the Activity leads out of
+        // your application to the Home screen.
+        TaskStackBuilder stackBuilder = TaskStackBuilder.create(context);
+        // Adds the back stack for the Intent (but not the Intent itself)
+        stackBuilder.addParentStack(StopLocalViewServerActivity.class);
+        // Adds the Intent that starts the Activity to the top of the stack
+        stackBuilder.addNextIntent(resultIntent);
+        PendingIntent resultPendingIntent =
+                stackBuilder.getPendingIntent(
+                        0,
+                        PendingIntent.FLAG_UPDATE_CURRENT
+                        );
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context);
+        builder.setSmallIcon(R.drawable.ic_launcher).setContentTitle("LocalViewServer running")
+                .setContentInfo(message).setContentIntent(resultPendingIntent);
+        sNotificationManager.notify(LOCAL_VIEW_SERVER_NOTIFICATION_ID, builder.build());
+        // final Notification notification = new Notification();
+        // notification.icon = R.drawable.ic_launcher;
+        // notification.tickerText = "LocalViewServer running";
+        // notification.contentView =
+        // sNotificationManager.notify(LOCAL_VIEW_SERVER_NOTIFICATION_ID,
+        // notification);
+    }
+
+    private static void cancelNotification() {
+        sNotificationManager.cancel(LOCAL_VIEW_SERVER_NOTIFICATION_ID);
+    }
+
     /*
      * (non-Javadoc)
      * @see com.android.debug.hv.ViewServer#addWindow(android.app.Activity)
@@ -371,6 +421,8 @@ public class LocalViewServer implements ViewServer {
      */
     @Override
     public void removeWindow(Activity activity) {
+        if (DEBUG)
+            Log.d(LOG_TAG, "removeWindow(" + activity.getComponentName() + ")");
         removeWindow(activity.getWindow().getDecorView());
     }
 

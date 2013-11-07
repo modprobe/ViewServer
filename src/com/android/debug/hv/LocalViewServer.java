@@ -173,6 +173,8 @@ public class LocalViewServer implements ViewServer {
     // Bind only to a local address, thus not accessible through the external
     // network
     private boolean mBindLocalAddressOnly;
+    
+    private static volatile Boolean sStopped = false;
 
     private static ViewServer sServer;
     private static NotificationManager sNotificationManager;
@@ -204,7 +206,7 @@ public class LocalViewServer implements ViewServer {
     public static ViewServer get(Context context, int port, boolean bindLocalPortOnly) {
         ApplicationInfo info = context.getApplicationInfo();
         if (BUILD_TYPE_USER.equals(Build.TYPE)
-                && (info.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                && (info.flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0 || sStopped) {
             if (sServer == null) {
                 // FIXME:
                 // Strictly speaking, we should check for same port and
@@ -288,19 +290,31 @@ public class LocalViewServer implements ViewServer {
      */
     @Override
     public boolean start() throws IOException {
-        if (mThread != null) {
+        synchronized (LocalViewServer.class) {
+            Log.d(LOG_TAG, "start: sStopped=" + sStopped + " " + Thread.currentThread());
+            if (sStopped) {
+                if (DEBUG) {
+                    Log.d(LOG_TAG, "start: returning false sStopped=true " + this + " " + Thread.currentThread());
+                }
+                return false;
+            }
+            else if (DEBUG) {
+                Log.d(LOG_TAG, "start: sStopped=false " + this + " " + Thread.currentThread());
+            }
+            if (mThread != null) {
+                if (DEBUG)
+                    Log.d(LOG_TAG, "start: mThread=" + mThread + " already started. " + this);
+                return false;
+            }
+
             if (DEBUG)
-                Log.d(LOG_TAG, "start: mThread=" + mThread + " already started.");
-            return false;
+                Log.d(LOG_TAG, "Local View Server [port=" + mPort + "] " + this);
+            mThread = new Thread(this, "Local View Server [port=" + mPort + "]");
+            mThreadPool = Executors.newFixedThreadPool(VIEW_SERVER_MAX_CONNECTIONS);
+            mThread.start();
+
+            return true;
         }
-
-        if (DEBUG)
-            Log.d(LOG_TAG, "Local View Server [port=" + mPort + "]");
-        mThread = new Thread(this, "Local View Server [port=" + mPort + "]");
-        mThreadPool = Executors.newFixedThreadPool(VIEW_SERVER_MAX_CONNECTIONS);
-        mThread.start();
-
-        return true;
     }
 
     /*
@@ -309,46 +323,53 @@ public class LocalViewServer implements ViewServer {
      */
     @Override
     public boolean stop() {
-        if (DEBUG)
-            Log.d(LOG_TAG, "Local View Server: stopping server");
-        if (mThread != null) {
-            mThread.interrupt();
-            if (mThreadPool != null) {
+        synchronized (LocalViewServer.class) {
+
+            if (DEBUG)
+                Log.d(LOG_TAG, "Local View Server: stopping server " + this);
+            if (mThread != null) {
+                mThread.interrupt();
+                if (mThreadPool != null) {
+                    try {
+                        mThreadPool.shutdownNow();
+                    } catch (SecurityException e) {
+                        Log.w(LOG_TAG, "Could not stop all view server threads");
+                    }
+                }
+
+                mThreadPool = null;
+                mThread = null;
+
                 try {
-                    mThreadPool.shutdownNow();
-                } catch (SecurityException e) {
-                    Log.w(LOG_TAG, "Could not stop all view server threads");
+                    if (DEBUG) {
+                        Log.d(LOG_TAG, "Setting sStopped=true " + this);
+                    }
+                    sStopped = true;
+                    mServer.close();
+                    mServer = null;
+                    cancelNotification();
+                    return true;
+                } catch (IOException e) {
+                    Log.w(LOG_TAG, "Could not close the view server");
                 }
             }
 
-            mThreadPool = null;
-            mThread = null;
-
+            mWindowsLock.writeLock().lock();
             try {
-                mServer.close();
-                mServer = null;
-                cancelNotification();
-                return true;
-            } catch (IOException e) {
-                Log.w(LOG_TAG, "Could not close the view server");
+                mWindows.clear();
+            } finally {
+                mWindowsLock.writeLock().unlock();
             }
-        }
 
-        mWindowsLock.writeLock().lock();
-        try {
-            mWindows.clear();
-        } finally {
-            mWindowsLock.writeLock().unlock();
+            mFocusLock.writeLock().lock();
+            try {
+                mFocusedWindow = null;
+            } finally {
+                mFocusLock.writeLock().unlock();
+            }
+            
+            return false;
         }
-
-        mFocusLock.writeLock().lock();
-        try {
-            mFocusedWindow = null;
-        } finally {
-            mFocusLock.writeLock().unlock();
-        }
-
-        return false;
     }
 
     /*
@@ -365,24 +386,27 @@ public class LocalViewServer implements ViewServer {
                 .getSystemService(Context.NOTIFICATION_SERVICE);
         // Creates an explicit intent for an Activity in your app
         Intent resultIntent = new Intent(context, StopLocalViewServerActivity.class);
-        // The stack builder object will contain an artificial back stack for
-        // the
-        // started Activity.
-        // This ensures that navigating backward from the Activity leads out of
-        // your application to the Home screen.
-        TaskStackBuilder stackBuilder = TaskStackBuilder.create(context);
-        // Adds the back stack for the Intent (but not the Intent itself)
-        stackBuilder.addParentStack(StopLocalViewServerActivity.class);
-        // Adds the Intent that starts the Activity to the top of the stack
-        stackBuilder.addNextIntent(resultIntent);
-        PendingIntent resultPendingIntent =
-                stackBuilder.getPendingIntent(
-                        0,
-                        PendingIntent.FLAG_UPDATE_CURRENT
-                        );
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context);
+        // // The stack builder object will contain an artificial back stack for
+        // // the
+        // // started Activity.
+        // // This ensures that navigating backward from the Activity leads out
+        // of
+        // // your application to the Home screen.
+        // TaskStackBuilder stackBuilder = TaskStackBuilder.create(context);
+        // // Adds the back stack for the Intent (but not the Intent itself)
+        // stackBuilder.addParentStack(context.getClass());
+        // // Adds the Intent that starts the Activity to the top of the stack
+        // stackBuilder.addNextIntent(resultIntent);
+        // PendingIntent resultPendingIntent =
+        // stackBuilder.getPendingIntent(
+        // 0,
+        // PendingIntent.FLAG_UPDATE_CURRENT
+        // );
+        final PendingIntent pi = PendingIntent.getActivity(context, 1, resultIntent,
+                Intent.FLAG_ACTIVITY_NEW_TASK);
+        final NotificationCompat.Builder builder = new NotificationCompat.Builder(context);
         builder.setSmallIcon(R.drawable.ic_launcher).setContentTitle("LocalViewServer running")
-                .setContentInfo(message).setContentIntent(resultPendingIntent);
+                .setContentInfo(message).setContentIntent(pi /* resultPendingIntent */);
         sNotificationManager.notify(LOCAL_VIEW_SERVER_NOTIFICATION_ID, builder.build());
         // final Notification notification = new Notification();
         // notification.icon = R.drawable.ic_launcher;

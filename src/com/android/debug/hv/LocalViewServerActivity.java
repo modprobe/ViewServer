@@ -3,6 +3,7 @@ package com.android.debug.hv;
 import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+import android.util.Log;
 
 /**
  * Activity that handles a {@link LocalViewServer} in the corresponding lifecycle methods.
@@ -12,6 +13,8 @@ import android.os.Bundle;
  */
 public abstract class LocalViewServerActivity extends Activity {
 
+    private static final String TAG = "LocalViewServerActivity";
+    
     public static final String EXTRA_VIEW_SERVER_PORT = "com.dtmilano.android.viewserver.VIEW_SERVER_PORT";
     public static final String EXTRA_BIND_LOCAL_PORT_ONLY = "com.dtmilano.android.viewserver.BIND_LOCAL_PORT_ONLY";
     
@@ -40,4 +43,16 @@ public abstract class LocalViewServerActivity extends Activity {
     	super.onResume();
     	LocalViewServer.get(this, mPort, mBindLocalPortOnly).setFocusedWindow(this);
     }
+
+    /* (non-Javadoc)
+     * @see android.app.Activity#onActivityResult(int, int, android.content.Intent)
+     */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        
+        Log.d(TAG, "onActivityResult(" + requestCode + ", " + resultCode + ", " + data + ")");
+    }
+    
+    
 }
